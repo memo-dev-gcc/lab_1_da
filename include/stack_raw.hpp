@@ -2,13 +2,18 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
+
+using std::size_t;
+using std::move;
+using std::out_of_range;
 
 template<typename T>
 class StackRaw {
 private:
   T *data_ = nullptr;
-  std::size_t size_ = 0;
-  std::size_t capacity_ = 0;
+  size_t size_ = 0;
+  size_t capacity_ = 0;
   void grow();
 
 public:
@@ -27,108 +32,134 @@ public:
   const T &top() const;
 
   bool empty() const noexcept { return size_ == 0; }
-  std::size_t size() const noexcept { return size_; }
-  std::size_t capacity() const noexcept { return capacity_; }
+  size_t size() const noexcept { return size_; }
+  size_t capacity() const noexcept { return capacity_; }
 };
 
 // Restricción didáctica: T debe ser construible por defecto y asignable.
-// No se permite usar std::vector dentro de esta clase.
 
 template<typename T>
 void StackRaw<T>::grow() {
-  if (capacity_ <= 0) capacity_ = 2;
-  T * new_data = new T (capacity_ * 2);
-  for (int i =0 ; i < size_; i++){
-    new_data[i] = data_[i];
+  size_t new_capacity = capacity_ == 0 ? 2 : capacity_ * 2;
+  T * new_data = new T [new_capacity];
+  try {
+    for (size_t i = 0; i < size_; i++) {
+      new_data[i] = move(data_[i]);
+    }
+  } catch (...) {
+    delete [] new_data;
+    throw;
   }
-  capacity_ *= 2;
   delete [] data_;
+  data_ = new_data;
+  capacity_ = new_capacity;
 }
 
 template<typename T>
 StackRaw<T>::StackRaw(const StackRaw & another_stack) {
-  T * tmp = nullptr;
-  if (another_stack.capacity_ > capacity_)
-    tmp = new T [another_stack.capacity_];
-  else tmp = data_;
-
-  for (size_t i = 0; i < another_stack.size_; i++) {
-    tmp[i] = another_stack[i];
+  T * tmp = new T [another_stack.capacity_];
+  try {
+    for (size_t i = 0; i < another_stack.size_; i++) {
+      tmp[i] = another_stack.data_[i];
+    }
+  } catch (...) {
+    delete [] tmp;
+    throw;
   }
   data_ = tmp;
-}
-
-template<typename T>
-StackRaw<T>::StackRaw(StackRaw && another_stack) noexcept {
-  T * tmp = data_;
-  data_ = another_stack;
   size_ = another_stack.size_;
   capacity_ = another_stack.capacity_;
-
-  another_stack = nullptr;
-  another_stack.size_ = another_stack.capacity_ = 0;
-  delete [] tmp;
 }
 
 template<typename T>
 StackRaw<T> &StackRaw<T>::operator=(const StackRaw & another_stack) {
-  T * tmp = data_;
-  if ( another_stack.capacity_ > capacity_) tmp = new T [another_stack.capacity_];
-  for (size_t i = 0 ; i < another_stack.size_ ; i++) {
-    tmp [i] = another_stack [i];
+  if (this == &another_stack) return *this;
+  T * tmp = new T [another_stack.capacity_];
+  try {
+    for (size_t i = 0; i < another_stack.size_; i++) {
+      tmp[i] = another_stack.data_[i];
+    }
+  } catch (...) {
+    delete [] tmp;
+    throw;
   }
   delete [] data_;
   data_ = tmp;
+  size_ = another_stack.size_;
+  capacity_ = another_stack.capacity_;
+  return *this;
+}
+
+template<typename T>
+StackRaw<T>::StackRaw(StackRaw && another_stack) noexcept {
+  data_ = another_stack.data_;
+  size_ = another_stack.size_;
+  capacity_ = another_stack.capacity_;
+
+  another_stack.data_ = nullptr;
+  another_stack.size_ = another_stack.capacity_ = 0;
 }
 
 template<typename T>
 StackRaw<T> &StackRaw<T>::operator=(StackRaw && another_stack) noexcept {
-  T * tmp = data_;
-  data_ = another_stack;
+  if (this == &another_stack) return *this;
+  delete [] data_;
+  data_ = another_stack.data_;
   size_ = another_stack.size_;
   capacity_ = another_stack.capacity_;
 
-  another_stack = nullptr;
+  another_stack.data_ = nullptr;
   another_stack.size_ = another_stack.capacity_ = 0;
-  delete [] tmp;
-
   return *this;
 }
 
 template<typename T>
 StackRaw<T>::~StackRaw() {
-  delete[] data_;
+  delete [] data_;
 }
 
 template<typename T>
 void StackRaw<T>::push(const T & value) {
-  if (size_ == capacity_) grow ();
-  data_[size_++] = value;
+  if (size_ == capacity_) {
+    // Guarda el valor antes de que grow() libere el arreglo anterior.
+    T saved{};
+    saved = value;
+    grow();
+    data_[size_] = move(saved);
+  } else {
+    data_[size_] = value;
+  }
+  size_++;
 }
 
 template<typename T>
 void StackRaw<T>::push(T && value) {
-  if (size_ == capacity_) grow ();
-  data_[size_++] = value;
+  if (size_ == capacity_) {
+    // Guarda el valor antes de que grow() libere el arreglo anterior.
+    T saved{};
+    saved = move(value);
+    grow();
+    data_[size_] = move(saved);
+  } else {
+    data_[size_] = move(value);
+  }
+  size_++;
 }
 
 template<typename T>
 void StackRaw<T>::pop() {
-  if (empty()) throw std::out_of_range ("Error there are no elements to delete");
-  T value = data_[--size_];
-  throw std::logic_error("TODO StackRaw::pop");
+  if (empty()) throw out_of_range("pop on empty stack");
+  size_--;
 }
 
 template<typename T>
 T & StackRaw<T>::top() {
-  if (empty()) throw std::out_of_range ("Error there are no elements to delete");
-  T value = data_[size_-1];
-  return value;
+  if (empty()) throw out_of_range("top on empty stack");
+  return data_[size_ - 1];
 }
 
 template<typename T>
-const T &StackRaw<T>::top() const {
-  if (empty()) throw std::out_of_range ("Error there are no elements to delete");
-  const T value = data_[size_-1];
-  return value;
+const T & StackRaw<T>::top() const {
+  if (empty()) throw out_of_range("top on empty stack");
+  return data_[size_ - 1];
 }
